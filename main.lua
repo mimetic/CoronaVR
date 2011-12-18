@@ -131,7 +131,7 @@ local function onGyroscopeDataReceived( event )
 	local dx, dy, dz
 	dx,dy,dz = gyroDegrees(event)
 		
-	x = x + dx
+	x = x - dx
 	y = y + dy
 	z = z + dz
 	
