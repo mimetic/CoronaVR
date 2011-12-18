@@ -6,8 +6,14 @@
 display.setStatusBar( display.HiddenStatusBar )
 
 ----ULTIMOTE CODE
-local ultimote = require("Ultimote")
-ultimote.connect()
+
+local isSimulator = "simulator" == system.getInfo("environment")
+if (isSimulator) then
+	local ultimote = require("Ultimote")
+	ultimote.connect()
+end
+
+
 --ultimote.playMacro({name = "macros/accelerometer"})
 --ultimote.playMacro({name = "macros/multitouch"}) --play multiple macros at once
 ----ULTIMOTE CODE
