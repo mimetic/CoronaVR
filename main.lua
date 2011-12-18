@@ -20,13 +20,14 @@ end
 -------------------------------------------------
 
 
+
 local imagefile = "panorama.jpg"
 
 -- These scalers let me use a squished panoramic file. It turns out, a 1000 pixel high image is simply
 -- massive. 
 -- This code will require memory management and image swapping to handle the real thing, I fear.
-local imageScaleX = 6
-local imageScaleY = 3
+local imageScaleX = 4
+local imageScaleY = 4
 
 
 
@@ -38,9 +39,9 @@ local midscreenX = screenW*(0.5)
 local midscreenY = screenH*(0.5) 
 
 
-local x = "0"
-local y = "0"
-local z = "0"
+local x = 0
+local y = 0
+local z = 0
 
 local g = display.newGroup()
 local i = display.newImage(imagefile, true)
@@ -69,7 +70,7 @@ local fullRotationPixels = screenW * 4
 local screenPixelsPerDegree = fullRotationPixels / 360
 
 local imageWidthPixelsPerDegree = i.contentWidth / 360
-
+--print ("imageWidthPixelsPerDegree", imageWidthPixelsPerDegree)
 
 -- let's see... how about from looking down, to up, 90 degrees?
 local imageHeightPixelsPerDegree = (i.contentHeight - screenH) / 90
@@ -183,3 +184,21 @@ if system.hasEventSource( "gyroscope" ) then
 	system.setGyroscopeInterval( 60 )
     Runtime:addEventListener( "gyroscope", onGyroscopeDataReceived )
 end
+
+
+-------------------------------------------------
+-- I hope this helps reset the viewer...
+-------------------------------------------------
+local function onSystemEvent( event )
+	if ( event.type == "applicationExit" or event.type == "applicationSuspend" ) then
+		x = 0
+		y = 0
+		z = 0
+		g.x = 0
+		g.y = 0
+		updateText(x,y,z, 0, 0)
+	end
+end
+Runtime:addEventListener( "system", onSystemEvent );
+
+
