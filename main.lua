@@ -3,19 +3,19 @@
 
 
 
-
+--display.setDrawMode( "wireframe", false )
 
 display.setStatusBar( display.HiddenStatusBar )
 
 local panorama = require("panorama")
 local onswipe = require("onSwipe")
 local funx = require("funx")
-local ui = require("ui")
+local widget = require("widget")
 
 
 
 ----ULTIMOTE CODE
-local useUltimote = true
+local useUltimote = false
 
 local isSimulator = "simulator" == system.getInfo("environment")
 if (isSimulator and useUltimote) then
@@ -24,11 +24,11 @@ if (isSimulator and useUltimote) then
 end
 
 
-------------------------------------------------------------
-------------------------------------------------------------
+-- ----------------------------------------------------------
+-- ----------------------------------------------------------
 -- HOT SPOTS
 
-function makeHotSpot()
+local function makeHotSpot()
 	local msg = {
 		"This is a hotspot on the screen, which can show more information, jump to a page, or play a movie or sound. It can even open a website."
 		}
@@ -51,14 +51,15 @@ function makeHotSpot()
 											{ "OK", "Learn More" }, onComplete )
 	end
 	
-	local hs1 = ui.newButton{
-		default = "button-help-helv.png",
-		over = "button-help-helv-over.png",
+	local hs1 = widget.newButton{
 		id = 1,
+		defaultFile = "button-help-helv.png",
+		overFile = "button-help-helv-over.png",
 		onRelease = showmsg,
-		x=300,
-		y=200,
+	x=300,
+	y=200,
 	}
+
 	hs1.alpha = 0.75
 	hs1:scale(2,2)
 	
@@ -72,23 +73,41 @@ local midscreenY = screenH*(0.5)
 
 
 
---- sample group
-local panogroup = display.newGroup()
-local b = display.newRect(panogroup, 0,0,1540*6,800)
-b.alpha = 0
-local r = display.newRect(panogroup, 0,0,250,250)
-r:setFillColor(130,250,130)
-r.alpha = 1
-r.x = panogroup.width/2
-r.y = panogroup.height/2
+-- ----------------------------------------------------------
+-- Sample overlay object
+local overlay = display.newGroup()
+overlay.anchorChildren = true
+local overlaybg = display.newRect(overlay, 0,0,200,100)
+overlaybg:setFillColor(1,1,1,0.8)
+funx.anchorCenterZero(overlay)
 
-local overlay = display.newRect(0,0,200,100)
-overlayX = 0
-overlayY = 0
+local options = 
+{
+    parent = overlay,
+    text = "This is an overlay object.",     
+    x = 20,
+    y = 20,
+    width = 160,     --required for multi-line and alignment
+    font = native.systemFontBold,   
+    fontSize = 18,
+    align = "center"  --new alignment parameter
+}
+
+local myText = display.newText( options )
+myText:setFillColor( 1, 0, 0 )
+myText.x, myText.y = 0,0
+
+local overlayX = 100
+local overlayY = 0
+-- ----------------------------------------------------------
+
+
+
+local absolute = true
+local margins = {top = 50, left = 50, bottom = 50, right = 50, }
 
 local params = {
 	filename = "panorama/panorama.jpg",
-	panogroup = panogroup,
 	backgroundcolor = {250,250,250},
 	orientation = "landscape",
 	x = midscreenX,
@@ -97,17 +116,23 @@ local params = {
 	tiltAngle = 90,
 	imageScaleX = 1,
 	imageScaleY = 1,
-	touchonly = false,
+	touchonly = true,
 	navtype = "accelerometer",
 	maxDistanceToSlide = screenW,
-	showCloseButton = false,
+	showCloseButton = true,
+	closeButtonX = 960,
+	closeButtonY = 20,
 	overlay = overlay,
 	overlayX = overlayX,
 	overlayY = overlayY,
 	margins = margins,
 	absolute = absolute,
+	ultimote = useUltimote,
 	}
 	
 local myPano = panorama.new(params)
+funx.anchorCenter(myPano)
 myPano.x = midscreenX
 myPano.y = midscreenY
+
+myPano:activate()

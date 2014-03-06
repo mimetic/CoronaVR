@@ -37,6 +37,10 @@ local maxTapTime = 700
 
 local swipeDistance = 40
 
+local dragDistance = 0
+local dragDistanceX = 0
+local dragDistanceY = 0
+
 function new(actions)  
 
 	local allowHVSwiping = actions.allowHVSwiping or false
@@ -45,8 +49,10 @@ function new(actions)
 		if (actions.swipeLeft) then
 			-- print ("swipeLeft")
 			actions.swipeLeft(touch)
+			return true
 		else
 			print ("Missing function for SwipeLeft")
+			return false
 		end
 	end
 
@@ -54,8 +60,10 @@ function new(actions)
 		if (actions.swipeRight) then
 			-- print ("swipeRight")
 			actions.swipeRight(touch)
+			return true
 		else
 			print ("Missing function for swipeRight")
+			return false
 		end
 	end
 
@@ -63,8 +71,10 @@ function new(actions)
 		if (actions.swipeUp) then
 			-- print ("swipeUp")
 			actions.swipeUp(touch)
+			return true
 		else
 			print ("Missing function for swipeUp")
+			return false
 		end
 	end
 
@@ -72,8 +82,10 @@ function new(actions)
 		if (actions.swipeDown) then
 			-- print ("swipeDown")
 			actions.swipeDown(touch)
+			return true
 		else
 			print ("Missing function for swipeDown")
+			return false
 		end
 	end
 
@@ -81,44 +93,51 @@ function new(actions)
 		if (actions.cancelSwipe) then
 			-- print ("cancelSwipe")
 			actions.cancelSwipe(touch)
+			return true
 		else
 			print ("Missing function for Cancel phase.")
+			return false
 		end
 	end
 
 
-	local function swiping(dX, dY)
+	local function swiping(target, dX, dY, x, y)
 		if (actions.swiping) then
-			-- print("swiping: dX="..dX..", dY="..dY)
-			-- Note the "self" as the first parameter. It has to be there, or the first param
-			-- the function gets, i.e. actions.swiping(), will be self! I don't understand this!
-			actions.swiping(self, dX, dY)
+			actions.swiping(target, dX, dY, x, y)
+			return true
 		else
 			print ("Missing function for Swiping phase.")
+			return false
 		end
 	end
 
 	local function tap(touch)
 		if (actions.tap) then
 			actions.tap(touch)
+			return true
 		else
 			print ("Missing tap function")
+			return false
 		end
 	end
 
 	local function initSwipe(touch)
 		if (actions.init) then
 			actions.init(touch)
+			return true
 		else
 			print ("Missing init function")
+			return false
 		end
 	end
 
 	local function endSwipe(touch)
 		if (actions.endSwipe) then
 			actions.endSwipe(touch)
+			return true
 		else
 			print ("Missing endSwipe function")
+			return false
 		end
 	end
 
@@ -152,8 +171,9 @@ function new(actions)
 						deltaX = 0
 					end
 				end
+				
 				if (abs(deltaX) + abs(deltaY) > 0) then
-					swiping(deltaX, deltaY)
+					swiping(self, deltaX, deltaY, touch.x, touch.y)
 				end
 
 			elseif ( phase == "ended" or phase == "cancelled" ) then
@@ -166,9 +186,6 @@ function new(actions)
 				dragDistanceY = touch.y - startPosY
 				
 				-- tap, not a drag
-				if (debugSwipe) then
-					debugmsg.text = "onSwipe says, distance = "..(dragDistance)
-				end
 				if (dragDistance < 10) then
 					local timePassed = system.getTimer() - startTime
 					--print ("Time for tap: "..timePassed)
@@ -183,10 +200,9 @@ function new(actions)
 						-- print ("** Drag distance X ("..dragDistanceX.." < 100 : NO SWIPE!)")
 					else 
 						-- horizontal or vertical drag?
+						local dragAxis = "vertical"
 						if (abs(dragDistanceX) > abs(dragDistanceY)) then
 							dragAxis = "horizontal"
-						else
-							dragAxis = "vertical"
 						end
 		
 						-- print("onSwipe: Axis: " .. dragAxis .. " dragDistance: " .. dragDistance)

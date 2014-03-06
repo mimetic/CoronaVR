@@ -59,6 +59,7 @@ local params = {
 	tiltAngle = 90,
 	imageScaleX = 0.2,
 	imageScaleY = 0.2,
+	noWrap = false,
 	touchonly = false,
 	navtype = "gyrovr",
 	maxDistanceToSlide = screenW,
@@ -81,16 +82,44 @@ It is risky to set the maxDistanceToSlide to greater than a screen width!
 
 ]]
 
-module(..., package.seeall)
+--module(..., package.seeall)
+
+local funx = require ("funx")
+
+local onSwipe = require ("onSwipe")
 
 
--- These scalers let me use a squished panoramic file. It turns out, 
--- a 1000 pixel high image is simply massive. 
--- This code will require memory management and image swapping to handle the real thing, I fear.
+local P = {}
 
 
+function P.new(params)
+	
+	params = params or {}
+	
+	-- Group to return from new()
+	local panoGroup = display.newGroup()
+	--panoGroup.anchorChildren = true
+	
+	-- A way to track all added Runtime handlers so we can properly delete the object
+	panoGroup._mb_runtimeHandlers = {}
+	
 
-function new(params)
+
+	-- Ultimote simulator
+	local isSimulator = "simulator" == system.getInfo("environment")
+	local mysetAccelerometerInterval
+	if (isSimulator and params.ultimote) then
+		mysetAccelerometerInterval = 15
+	else
+		mysetAccelerometerInterval = 62
+	end
+
+
+	--local widget = require "widget-v1"
+	local widget = require "widget"
+
+	local max = math.max
+	local min = math.min
 
 	local screenW, screenH = display.contentWidth, display.contentHeight
 	local midscreenX = screenW*(0.5) 
@@ -99,8 +128,6 @@ function new(params)
 	local imageScaleX = params.imageScaleX or 1
 	local imageScaleY = params.imageScaleY or 1
 	
-	local panoGroup = display.newGroup()
-	local pano = display.newGroup()	
 	
 	-- Set the touch navigation to false initially
 	local useTouch = false
@@ -115,6 +142,15 @@ function new(params)
 			maxMomentusDx = screenH
 		else
 			maxMomentusDx = screenW
+		end
+	end
+		
+	local maxMomentusDy = tonumber(params.maxDistanceToSlide) or 0
+	if (maxMomentusDy == 0) then
+		if (params.orientation == "portrait") then
+			maxMomentusDy = screenH
+		else
+			maxMomentusDy = screenW
 		end
 	end
 		
@@ -144,7 +180,7 @@ function new(params)
 	-- Width of main pano pic, composed of four panes
 	local panoWidth = 0
 	local panoHeight = 0
-	local leftpanewidth, rightpanewidth, leftpaneheight, rightpaneheight
+	local leftpanewidth, leftpaneHeight, rightpanewidth, leftpaneheight, rightpaneheight
 	
 	-------------------------------------------------
 	-- Make a repeating 360 degree image display group from an image.
@@ -153,15 +189,19 @@ function new(params)
 	-- Either we repeat the main image for wrap around,
 	-- or if available, we use filename-left and filename-right.
 	-------------------------------------------------
-	function buildRepeatingImage(filename, panoOverlay, backgroundcolor, zoom, tiltAngle, orientation)
+	local function buildRepeatingImage(filename, path, basedir, panoOverlay, backgroundcolor, zoom, tiltAngle, orientation, noWrap, multifile)
+		
+		if (multifile ~= false) then
+			multifile = true
+		end
 		
 		zoom = zoom or 1
 		orientation = orientation or "landscape"
-		
 		-- let's see... how about from looking down, to up, 90 degrees?
 		local tiltAngle = tiltAngle or 90
 		
 		local g = display.newGroup()
+		g.anchorChildren = true
 
 		-- Load 4 images, one for each direction
 		-- They should all be same size
@@ -170,127 +210,182 @@ function new(params)
 		local yoff = 0
 		
 		-- panes to add — repeat first and last on ends for wrapping.
-		local panoimage = display.newGroup()
-		local ext = {4,1,2,3,4,1}
-		for k,i in ipairs(ext) do
-			local f = string.sub(filename,1,-5) .. "-" .. i .. string.sub(filename,-4,-1)
-			local pane = display.newImage(f, true)
-			if (not pane) then
-				print ("WARNING: The image file "..filename.." was not found!")
-				return false
-			end
-			panoimage:insert(pane)
-			pane:setReferencePoint(display.TopLeftReferencePoint)
-			if (orientation == "landscape") then
-				pane.x = xoff
-				pane.y = 0
-				xoff = xoff + pane.contentWidth
+		local panoimage
+		
+		if (multifile ~= false) then
+		
+			panoimage = display.newGroup()
+			panoimage.anchorChildren = true
+
+			local ext, panestart,panend
+			
+			if (noWrap) then
+				panestart = 1
+				panend = 4
+				ext = {1,2,3,4}
 			else
-				pane.y = yoff
-				pane.x = 0
-				yoff = yoff + pane.contentHeight
+				panestart = 1
+				panend = 6
+				ext = {4,1,2,3,4,1}
 			end
 			
-			-- Calc. the total width, not including the overlap panels at beginning and end
-			if (k == 1 or k == 6) then
-				--pane.alpha = 0.5
-			else
-				panoWidth = panoWidth + (pane.contentWidth * imageScaleX)
-				panoHeight = panoHeight + (pane.contentHeight * imageScaleY)
+			--for k,i in ipairs(ext) do
+			for k=panestart,panend,1 do
+				local i = ext[k]
+				local f = string.sub(filename,1,-5) .. "-" .. i .. string.sub(filename,-4,-1)
+				local pane = funx.loadImageFile(f, path, basedir)
+				if (not pane) then
+					print ("WARNING: The image file "..filename.." was not found!")
+					return false
+				end
+				panoimage:insert(pane)
+				funx.anchorTopLeft(pane)
+				if (orientation == "landscape") then
+					pane.x = xoff
+					pane.y = 0
+					xoff = xoff + pane.contentWidth
+				else
+					pane.y = yoff
+					pane.x = 0
+					yoff = yoff + pane.contentHeight
+				end
+				
+				
+				-- Calc. the total width, not including the overlap panels at beginning and end
+				if (k == 1 or k == 6) then
+					--pane.alpha = 0.5
+				else
+					if (orientation == "landscape") then
+						panoWidth = panoWidth + (pane.contentWidth * imageScaleX)
+					else
+						panoHeight = panoHeight + (pane.contentHeight * imageScaleY)
+					end
+				end
+				
+				if (k == 1) then
+					leftpanewidth = pane.width
+					leftpaneheight = pane.height
+				elseif (k == 6) then
+					rightpanewidth = pane.width
+					rightpaneheight = pane.height
+				end
 			end
-			
-			if (k == 1) then
-				leftpanewidth = pane.width
-				leftpaneheight = pane.height
-			elseif (k == 6) then
-				rightpanewidth = pane.width
-				rightpaneheight = pane.height
+		else
+			-- true = don't rescale to fit screen
+			panoimage = funx.loadImageFile(params.filename, path, basedir)
+
+			if (not panoimage) then
+				print ("ERROR: the file '",params.filename,"' is missing!")
+				return display.newGroup()
 			end
+			panoWidth = panoimage.width
+			panoHeight = panoimage.height
+			leftpanewidth = 0
+			leftpaneheight = 0
 		end
 		
 		g:insert(panoimage)
 		g.backgroundimage = panoimage
-		
+		funx.anchorTopLeftZero(panoimage)
 		
 		-- Assume all panes the same width!
 		
-		-- TESTING BACKGROUND
+		-- BACKGROUND
 		local backgroundrect
 		if (backgroundcolor ~= nil) then
-			local imagewidth = g.contentWidth
-			local imageheight = g.contentHeight
+			local imagewidth = max(g.contentWidth, funx.percentOfScreenWidth(funx.getValue(params.backgroundWidth)) or g.contentWidth)
+			imagewidth = imagewidth * imageScaleX
+			local imageheight = max(g.contentHeight, funx.percentOfScreenHeight(funx.getValue(params.backgroundHeight)) or g.contentHeight)
+			imageheight = imageheight * imageScaleY
+
 			backgroundrect = display.newRect(0, 0, imagewidth, imageheight)
 			--backgroundrect:scale(imageScaleX, imageScaleY)
-			if (type(backgroundcolor) ~= "table") then
-				backgroundcolor = funx.split(backgroundcolor, ",") or {0,0,0}
-			end
-			backgroundrect:setFillColor(backgroundcolor[1], backgroundcolor[2], backgroundcolor[3])
-			backgroundrect.alpha = 1
+			backgroundcolor = funx.stringToColorTable(backgroundcolor)
+			backgroundrect:setFillColor( unpack(backgroundcolor) )
+			backgroundrect.alpha = 1 --backgroundcolor[4]/255 or 1
 			g:insert(1, backgroundrect)
-			backgroundrect:setReferencePoint(display.TopLeftReferencePoint)
-			backgroundrect.x = 0
-			backgroundrect.y = 0
+			funx.anchorTopLeftZero(backgroundrect)
 		end
-
 		if (panoOverlay) then
+			-- Should have been hidden previously so it won't appear until built!
+			-- Now we must make it visible.
+			panoOverlay.isVisible = true
 			g:insert(panoOverlay)
-			--g.panoOverlay = panoOverlay
-			panoOverlay:setReferencePoint(display.TopLeftReferencePoint)
+			g.panoOverlay = panoOverlay
+			funx.anchorTopLeftZero(panoOverlay)
+			
+			local zeroX, zeroY
+			if (noWrap) then
+				zeroX = 0
+				zeroY = 0
+			else
+				zeroX = leftpanewidth
+				zeroY = leftpaneheight
+			end
+			
 			if (orientation == "landscape") then
-				panoOverlay.x = leftpanewidth
+				panoOverlay.x = zeroX or panoWidth
 				panoOverlay.y = 0
 			else
 				panoOverlay.x = 0
-				panoOverlay.y = leftpaneheight
+				panoOverlay.y = zeroY or panoHeight
 			end
-			
 			--[[
-			panoOverlay:setReferencePoint(display.CenterReferencePoint)
+			funx.anchorCenter(panoOverlay)
 			panoOverlay.x = g.width/2
 			panoOverlay.y = g.height/2
 			]]
 		else
 			g.panoOverlay = nil
 		end
+		
 		g.overlay = panoOverlay
-		g:scale(imageScaleX, imageScaleY)
+		if (imageScaleX ~= 1 and imageScaleY ~= 1) then
+			g:scale(imageScaleX, imageScaleY)
+		end
+		if (orientation == "landscape") then
+			panoHeight = g.contentHeight
+		else
+			panoWidth = g.contentWidth
+		end
 
 		return g
 	end
 	
 
-	------------------------------------------------------------
-	-------------------------------------------------
-	-- Alert the user that something significant has happened
-	local function flashscreen()
-		local function screenFullOpaque()
-			transition.to(pano.imagelayer.backgroundimage, { alpha = 1, time=300 } )
-		end
-		transition.to(pano.imagelayer.backgroundimage, { alpha = 0.5, time=300, onComplete = screenFullOpaque } )
-	end
-	
-	
 	-------------------------------------------------
 	-- Switch navigation methods, touch and gyro
 	-- true then non gyro or accelerometer
-	local function switchNavMethod(t)
-		if (t) then
-			if (navtype == "gyrotilt" or navtype == "gyrovr") then
-				Runtime:removeEventListener( "gyroscope", pano )
-			else
-				Runtime:removeEventListener( "accelerometer", pano )
+	-- ANDROID DOES NOT HAVE GYRO!
+	local function switchNavMethod(useTouch)
+		local isAndroid = "Android" == system.getInfo("platformName")
+
+		if (panoGroup.technique ~= "widget") then
+			if (useTouch) then
+				if (navtype == "gyrotilt" or navtype == "gyrovr") then
+					Runtime:removeEventListener( "gyroscope", panoGroup )
+				else
+					Runtime:removeEventListener( "accelerometer", panoGroup )
+				end
+				funx.flashscreen()
+				if (not panoGroup.settings.touchonly) then
+					funx.tellUser("Tilt Navigation is Off.")
+				end
+				--print ("Touch ",useTouch)
+			elseif (not panoGroup.settings.touchonly and not isAndroid and panoGroup.tilting and panoGroup.technique) then
+				if (navtype == "gyrotilt" or navtype == "gyrovr") then
+					system.setGyroscopeInterval( mysetAccelerometerInterval )
+					Runtime:addEventListener( "gyroscope", panoGroup )
+					panoGroup._mb_runtimeHandlers[#panoGroup._mb_runtimeHandlers+1] = { "gyroscope", panoGroup }
+				else
+					system.setAccelerometerInterval( mysetAccelerometerInterval )	-- default: 75.0 (30fps) or 62.0 for 60 fps
+					Runtime:addEventListener( "accelerometer", panoGroup )
+					panoGroup._mb_runtimeHandlers[#panoGroup._mb_runtimeHandlers+1] = { "accelerometer", panoGroup }
+				end
+				funx.flashscreen()
+				funx.tellUser("Tilt Navigation is On.")
+				--print ("Touch ",useTouch)
 			end
-			flashscreen()
-			--print ("Touch ",useTouch)
-		else
-			if (navtype == "gyrotilt" or navtype == "gyrovr") then
-				Runtime:addEventListener( "gyroscope", pano )
-			else
-				Runtime:addEventListener( "accelerometer", pano )
-			end
-			flashscreen()
-			funx.tellUser("Tilting is On.")
-			--print ("Touch ",useTouch)
 		end
 	end
 	
@@ -300,13 +395,15 @@ function new(params)
 	-- Update the position of the pano to handle wrapping
 	-------------------------------------------------
 	local function updateWrapping(pano)
-		if (pano.x > panoWidth/2 ) then
-			local extra = pano.x - panoWidth/2
-			pano.x = -(panoWidth/2) + extra
-		elseif (pano.x < -(panoWidth/2) ) then
-			local extra = panoWidth/2 + pano.x
-			pano.x = panoWidth/2 + extra
-		end	
+		if (not pano.noWrap) then
+			if (pano.x > panoWidth/2 ) then
+				local extra = pano.x - panoWidth/2
+				pano.x = -(panoWidth/2) + extra
+			elseif (pano.x < -(panoWidth/2) ) then
+				local extra = panoWidth/2 + pano.x
+				pano.x = panoWidth/2 + extra
+			end	
+		end
 	end
 	
 
@@ -324,6 +421,7 @@ function new(params)
 	
 	-------------------------------------------------
 	local function doNothing()
+		return true
 	end
 	
 	-------------------------------------------------
@@ -343,6 +441,7 @@ function new(params)
 	-- MAKE IMAGES FOLLOW FINGER DURING A SWIPE
 	-------------------------------------------------
 	local function followSwipe(self, dX, dY)
+		
 		if (not dX) then
 			dX = 0
 		end
@@ -350,79 +449,156 @@ function new(params)
 		if (not dY) then
 			dY = 0
 		end
-		local newY = pano.y + dY
-		if (newY > pano.minY and newY < pano.maxY) then
-			pano.y =  newY
-			mY = dY
-		end
-	
-		pano.x = pano.x + dX
-		mX = dX
 		
-		-- wrap around
-		--print ("pano.x:", pano.x, pano.contentWidth, panoWidth, pano.contentWidth - panoWidth)
-		updateWrapping(pano)
-		--[[
-		if (pano.x > panoWidth/2 ) then
-			pano.x = -(panoWidth/2)
-		elseif (pano.x < -(panoWidth/2) ) then
-			pano.x = panoWidth/2
-		end	
-		]]
+		local newY = self.y + dY
+		local newX = self.x + dX
+
+		--print (newX, newY, self.minX, self.maxX)
+		if (self.settings.orientation ~= "portrait") then
+			-- NO vertical wrapping
+			if (newY > self.minY and newY < self.maxY) then
+				self.y =  newY
+				mY = dY
+			end
+			
+			-- YES horizontal wrapping
+			if (self.noWrap) then
+				if (newX > self.minX and newX < self.maxX) then
+					self.x =  newX
+					mX = dX
+				end
+			else
+				self.x = self.x + dX
+				mX = dX
+				updateWrapping(self)
+			end
+		else
+
+			-- NO vertical wrapping
+			if (newY > self.minY and newY < self.maxY) then
+				self.y =  newY
+				mY = dY
+			end
+			
+			-- YES horizontal wrapping
+			if (self.noWrap) then
+				if (newX > self.minX and newX < self.maxX) then
+					self.x =  newX
+					mX = dX
+				end
+			else
+				self.x = self.x + dX
+				mX = dX
+				updateWrapping(self)
+			end
+		end
+		
+	end
+	
+	
+	-------------------------------------------------
+	-- Slide Screen
+	-------------------------------------------------
+	local function goOnSliding(event)
+
+		local pano = event.target
+		
+		-- X direction
+		local dx = momentumMultiplier * mX
+		if (dx > maxMomentusDx) then
+			dx = maxMomentusDx
+		end
+		if (dx < -maxMomentusDx) then
+			dx = -maxMomentusDx
+		end
+		local newX = max(pano.x + dx, pano.minX)
+		newX = min(newX, pano.maxX)
+		
+		-- Y direction
+		local dy = (momentumMultiplier * mY)
+		if (dy < -maxMomentusDy) then
+			dy = -maxMomentusDy
+		end
+		if (dy > maxMomentusDy) then
+			dy = maxMomentusDy
+		end
+		local newY = max(pano.y + dy, pano.minY)
+		newY = min(newY, pano.maxY)
+
+		local params = {
+			x = newX,
+			y = newY,
+			transition = easing.outQuad,
+			onComplete = updateWrapping,
+		}
+		momentum = transition.to(pano, params )
 	end
 	
 	
 	-------------------------------------------------
 	-- Slide Screen Left
 	-------------------------------------------------
-	local function goLeft()
-		local dx = (momentumMultiplier * mX)
-		if (dx < -maxMomentusDx) then
-			dx = -maxMomentusDx
-		end
-		local params = {
-			x = pano.x + dx,
-			transition = easing.outQuad,
-			onComplete = updateWrapping,
-		}
-		momentum = transition.to(pano, params )
+	local function goLeft(event)
+		goOnSliding(event)
 	end
 	
 	-------------------------------------------------
 	-- Slide Screen Right
 	-------------------------------------------------
-	local function goRight()
-		local dx = momentumMultiplier * mX
-		if (dx > maxMomentusDx) then
-			dx = maxMomentusDx
-		end
-		local params = {
-			x = pano.x + dx,
-			transition = easing.outQuad,
-			onComplete = updateWrapping,
-		}
-		momentum = transition.to(pano, params )
+	local function goRight(event)
+		goOnSliding(event)
 	end
 	
 	-------------------------------------------------
-	local function goUp()
+	local function goUp(event)
+		goOnSliding(event)
 	end
 	
 	-------------------------------------------------
-	local function goDown()
-	end
-	
-	
-	-------------------------------------------------
-	local function keepGoing (mX, mY)
+	local function goDown(event)
+		goOnSliding(event)
 	end
 	
 	-------------------------------------------------
-	local function onTap ()
-		if (not params.touchonly) then
+	local function onTap (event)
+		local pano = event.target
+		local w = pano.contentWidth
+		local h = pano.contentHeight
+		local x = event.x
+		local y = event.y
+
+		if (not pano.settings.touchonly) then
 			useTouch = not useTouch
 			switchNavMethod(useTouch)
 		end
+		
+		--[[
+		------- FOR DEVELOPMENT: SHOW POINT WHERE TAPPED
+		local mapx = w - (pano.x + (w/2) ) - (screenW/2)
+		local mapy = h - (pano.y + (h/2) ) - (screenH/2)
+		mapx = mapx + x
+		mapy = mapy + y
+		
+		-- offset for item size 150x50
+		local itemsize = {w=150, h=50}
+		mapx2 = mapx - (itemsize.w/2)
+		mapy2 = mapy - (itemsize.h/2)
+		
+		local px = mapx/w
+		local px2 = mapx2/w
+		
+		local py = mapy2/h
+		local py2 = (mapy2+(itemsize.h/2))/h
+		
+		px = math.floor( px * 1000)/10
+		px2 = math.floor( px2 * 1000)/10
+		py = math.floor( py * 1000)/10
+		py2 = math.floor( py2 * 1000)/10
+		
+print ("panorama: onTap: For item "..itemsize.w.."x"..itemsize.h..", LEFT x,y on tap:",px.."%", py.."%", ", CENTER X: x="..px2.."% TOP Y=", py2.."%")
+--print ("panorama: onTap: x,y on tap:",x,y, mapx, mapy, px.."%", py.."%")
+		]]
+
 	end
 	
 	-------------------------------------------------
@@ -435,17 +611,10 @@ function new(params)
 	-- Gyroscope Listener
 	-- x,y,z are in degrees, not cartesian!
 	-------------------------------------------------
-	function panoGroup:gyroscope( event )
+	local function gyroscope( event )
 	
-	--[[
-		if (not panoGroup.isActive) then
-			funx.tellUser("Gyro is Off.")
-			return
-		else
-			funx.tellUser("Gyro is On.")
-		end
-	]]
-	print ("GYRO")
+	
+	--print ("GYRO")
 		-------------------------------------------------
 		-- Called when a new gyroscope measurement has been received.
 		local function gyroDegrees ( event )
@@ -488,6 +657,7 @@ function new(params)
 			return deltaXDegrees, deltaYDegrees, deltaZDegrees
 		end
 
+		local pano = event.target
 		local dX, dY, dZ
 		dX,dY,dZ = gyroDegrees(event)
 		
@@ -495,37 +665,32 @@ function new(params)
 --		y = self.y
 --		z = self.zoom
 		
+		-- Stored x,y,z values based on initial settings.
 		x = x - dX
 		y = y + dY
 		z = z + dZ
 		
-		
-		self.x =  x * self.imageWidthPixelsPerDegree
-	
 		-- up/down
-		local newY =  y * self.imageHeightPixelsPerDegree
+		local newY =  y * pano.imageHeightPixelsPerDegree
 		if (newY > pano.minY and newY < pano.maxY) then
-			self.y =  newY
+			pano.y =  newY
 		end
 	
+		-- Wrapping:
 		
-		-- If we hit the end of the image, loop around
-		--[[
-		-- wrap around
-		--print ("pano.x:", pano.x, pano.contentWidth, panoWidth, pano.contentWidth - panoWidth)
-		if (self.x > panoWidth/2 ) then
-			self.x = -(panoWidth/2)
-			x = beginX
-		elseif (self.x < -(panoWidth/2) ) then
-			self.x = panoWidth/2
-			x = endX
-		end	
-		--]]
---print ("x,z degrees:", x,y)
-		if (x > endX) then
-			x = beginX
-		elseif (x < beginX) then
-			x = endX
+		if (not pano.noWrap) then
+			pano.x =  x * pano.imageWidthPixelsPerDegree
+			-- If we hit the end of the image, loop around
+			if (x > endX) then
+				x = beginX
+			elseif (x < beginX) then
+				x = endX
+			end
+		else
+			local newX = x * pano.imageWidthPixelsPerDegree
+			if (newX > pano.minX and newX < pano.maxX) then
+				pano.x =  newX
+			end
 		end
 
 	end
@@ -538,14 +703,17 @@ function new(params)
 	-------------------------------------------------
 	-- accelerometer Listener
 	-------------------------------------------------
-	function panoGroup:accelerometer( event )
+	local function accelerometer( event )
 	--[[
 		if (not panoGroup.isActive) then
 			return
 		end
 	]]
 	
-		tiltThreshold = 0.1
+	--print ("Accel called")
+		local dX, dY, dZ, xMagnifier, yMagnifier
+	
+		local tiltThreshold = 0.1
 		
 		if (params.orientation == "portrait") then
 			dX = event.xGravity
@@ -561,19 +729,20 @@ function new(params)
 		
 		-- ignore if great that than this -- they have turned it too far.
 		local extremeTilt = 0.5
+		local pano = event.pano
 		
 		dX = floor(dX * 100)/100
 		dY = floor(dY * 100)/100
 		if (dX < extremeTilt and dY < extremeTilt) then 
-			local newX = self.x
-			local newY = self.y
+			local newX = pano.x
+			local newY = pano.y
 			
 			-- Display message and sound beep if Shake'n
 			--
 			if event.isShake == true then
 				--print ("SHAKE!")
-				self.x = params.y
-				self.y = params.x
+				pano.x = params.y
+				pano.y = params.x
 				funx.tellUser("Reset position.")
 				
 			elseif ( (abs(dX) > tiltThreshold) or (abs(dY) > tiltThreshold) ) then 
@@ -598,37 +767,21 @@ function new(params)
 				end
 			end	
 
-			--[[
-			if (abs(dX) > tiltThreshold) then
-				newX = self.x + (dX * xMagnifier)
-				print ("X")
-			end
-	
-			if (abs(dY) > tiltThreshold) then
-				newY = self.y + (dY * yMagnifier)
-				print ("Y")
-			end
-			]]
-	
 			-- up/down
 			if (newY > pano.minY and newY < pano.maxY) then
-				self.y =  newY
+				pano.y =  newY
 			end
 
 			if (newX > pano.minX and newX < pano.maxX) then
-				self.x =  newX
+				pano.x =  newX
 			end
 			
 			
-			--print ("xAxis,yAxis, maxX, maxY", xAxis,yAxis, pano.maxX, pano.maxY)
-			--print ("dX,dY",dX,dY,"self:", self.x, self.y)
-			--]]
-			
 			-- Zoom!
 			if (doScaling) then
-				local sx = self.xScale - (dZ * damper)
-				local sy = self.yScale - (dZ * damper)
-				self:scale(sx,sy)
+				local sx = pano.xScale - (dZ * pano.damper)
+				local sy = pano.yScale - (dZ * pano.damper)
+				pano:scale(sx,sy)
 			end
 			
 		end
@@ -638,28 +791,261 @@ function new(params)
 	-- END accelerometer
 	-------------------------------------------------
 
+	-------------------------------------------------
+	-- add a close button to the pano group
+	function panoGroup:addCloseButton(params)
+		
+		local function closePanoGroup(event)
+			self:deactivate()
+		end
+	
+		
+		local default = params.closeButtonDefault or "_ui/button-cancel-round.png"
+		local over = params.closeButtonOver or "_ui/button-cancel-round-over.png"
+		-- Now make close button
+		local closeButton = widget.newButton{
+			id = "closepanorama",
+			defaultFile = default,
+			overFile = over,
+			onRelease = closePanoGroup,
+		}
+		funx.anchorTopLeft(closeButton)
+		-- allow 10 px for the shadow of the popup background
+		local ref = "TopLeft"
+		local x = params.closeButtonX or (screenW - closeButton.width - 10)
+		local y = params.closeButtonY or (screenH - closeButton.height - 10)
+		x, y, ref = funx.positionObjectWithReferencePoint(x, y, screenW, screenH, params.margins, params.absolute)
+		
+		self:insert(closeButton)
+		closeButton:toFront()
+		
+		self.closeButton = closeButton
+
+		funx.setAnchorFromReferencePoint(closeButton, ref)
+		closeButton.x = x
+		closeButton.y = y 
+	end
+	
+	
 
 	-------------------------------------------------
-	-- Zoom to fill screen
-	-------------------------------------------------
-	function panoGroup:init()
-		panoGroup.alpha = 0
-		panoGroup.isVisible = false
-		panoGroup.isActive = false
-		switchNavMethod(true)
+	-- Load the images into the panoGroup
+	-- Must call "buildPanoStructure" first, to get the structure in
+	function panoGroup:loadImages()
+		
+		--funx.activityIndicator(true)
+
+		local settings = self.settings
+
+		local pano
+		local panoImage
+		
+--for i=1,1000 do		
+		panoImage = buildRepeatingImage(params.filename, panoGroup.path, panoGroup.basedir, settings.panoOverlay, settings.backgroundcolor, settings.zoom, settings.tiltAngle, settings.orientation, settings.noWrap, settings.multifile)
+
+		if (true or not settings.noWrap) then
+			------------------------------------
+			-- USE MY 360 WRAPPING, TILTING METHOD
+			pano  = display.newGroup()
+			pano.anchorChildren = true
+			
+			pano:insert(panoImage)
+			pano.content = panoImage
+			funx.anchorTopLeftZero(panoImage)
+
+			pano.orientation = settings.orientation
+			
+			-- Values for scrolling
+			pano.noWrap = settings.noWrap or false
+			
+			pano.originalScale = settings.originalScale or 1
+
+			if (settings.orientation == "landscape") then
+				if (pano.noWrap) then
+					pano.minX = midscreenX -  ( panoImage.contentWidth/2 )
+					pano.maxX = ( panoImage.contentWidth/2 ) - midscreenX
+					pano.minY = midscreenY -  ( panoImage.contentHeight/2 )
+					pano.maxY = ( panoImage.contentHeight/2 ) - midscreenY
+				else
+					pano.minX = midscreenX -  ( panoImage.contentWidth/2 )
+					pano.maxX = ( panoImage.contentWidth/2 ) + midscreenX
+					pano.minY = midscreenY -  ( panoImage.contentHeight/2 )
+					pano.maxY = ( panoImage.contentHeight/2 ) - midscreenY
+				end
+			else
+				-- PORTRAIT
+				if (pano.noWrap) then
+					pano.minX = midscreenX -  ( panoImage.contentWidth/2 )
+					pano.maxX = ( panoImage.contentWidth/2 ) - midscreenX
+					pano.minY = midscreenY -  ( panoImage.contentHeight/2 )
+					pano.maxY = ( panoImage.contentHeight/2 ) - midscreenY
+				else
+					pano.minX = midscreenX -  ( panoImage.contentWidth/2 )
+					pano.maxX = ( panoImage.contentWidth/2 ) + midscreenX
+					pano.minY = midscreenY -  ( panoImage.contentHeight/2 )
+					pano.maxY = ( panoImage.contentHeight/2 ) - midscreenY
+				end
+			end
+			-- four directions to fill up, N,S,E,W
+			pano.imageWidthPixelsPerDegree = panoWidth / 360
+			--print ("imageWidthPixelsPerDegree", imageWidthPixelsPerDegree)
+		
+			pano.imageHeightPixelsPerDegree = (panoHeight - screenH) / settings.tiltAngle
+				
+			pano.originalScale = settings.originalScale or 1
+
+			-------------------------------------------------
+			-- Add touch listeners
+			local touchActions = {
+						init = initSwipe,
+						swipeLeft = goLeft,
+						swipeRight = goRight,
+						swipeUp = goUp,
+						swipeDown = goDown,
+						cancelSwipe = doNothing,
+						swiping = followSwipe,
+						tap = onTap,
+						endSwipe = doNothing,
+						allowHVSwiping = true,
+						}
+			
+			local swipeListener = onSwipe.new(touchActions)
+			pano.touch = swipeListener
+			pano:addEventListener( "touch", pano )
+			
+			-- Slows down zooming which doesn't work right now
+			pano.damper = 10
+			
+		else
+			------------------------------------
+			-- USE WIDGET SCROLLVIEW
+--print ("Panorama: loadImages: Using widget technique")
+			self.technique = "widget"
+			self.tilting = false
+			-- WRONG...pano = ...
+			pano = widget.newScrollView{
+				width = screenW,
+				height = screenH,
+				scrollWidth = panoImage.contentWidth,
+				scrollHeight = panoImage.contentHeight,
+				backgroundColor = settings.slideview.panoramaBackgroundColor,
+			}
+	
+			pano:insert(panoImage)
+			funx.anchorTopLeftZero(panoImage)
+			pano:scrollToPosition(-pano.contentWidth/2 + midscreenX,-pano.contentHeight/2 + midscreenY,0)
+	
+		
+		end
+		
+		pano.settings = settings
+		
+		self:insert(pano)
+		self.pano = pano
+		pano:toBack()
+		
+		-- Set the pano orientation
+		if (settings.orientation == "landscape") then
+			funx.anchorCenter(pano)
+			pano.x = 0
+			pano.y = 0
+		else
+			funx.anchorCenter(pano)
+			pano.x = 0
+			pano.y = 0
+		end
+
+		self.loaded = true
+
 	end
 
 
 	-------------------------------------------------
-	-- Activate: zoom or fade in
+	-- Load the images into the panoGroup
+	function panoGroup:buildPanoStructure()
+
+		local settings = self.settings
+		
+		if (true or not settings.noWrap) then
+			------------------------------------
+			-- USE MY 360 WRAPPING, TILTING METHOD
+
+			self.technique = "custom"
+			self.tilting = true
+			
+			navtype = settings.navtype or "accelerometer"
+		else
+			------------------------------------
+			-- USE WIDGET SCROLLVIEW
+			
+			self.technique = "widget"
+			self.tilting = false
+
+		end
+
+
+		-- Create before adding the overlay...can't remember why...
+		if (settings.showCloseButton) then
+			self:addCloseButton(settings)
+		end
+
+		self.loaded = false
+		
+		-- Add invisible rect for positioning
+		--funx.addPosRect(self)
+		
+		-- Add static Overlay - Does not move
+		if (settings.overlay) then
+			self:insert(settings.overlay)
+			self.overlay = settings.overlay
+			local x, y, ref = funx.positionObjectWithReferencePoint(settings.overlayX, settings.overlayY, screenW, screenH, settings.margins, settings.absolute)
+			funx.setAnchorFromReferencePoint(settings.overlay, ref)
+			--print (x,y,ref)
+			settings.overlay.x = x or 0
+			settings.overlay.y = y + midscreenY
+		end
+		
+		if (settings.showCloseButton) then
+			self.closeButton:toFront()
+		end
+		
+	end
+
+
 	-------------------------------------------------
-	function panoGroup:activate(x,y)
+	-- Initialize the panorama
+	-------------------------------------------------
+	function panoGroup:init(params)
+		self.alpha = 0
+		self.isVisible = false
+		self.isActive = false
+		--switchNavMethod(true)
+	end
+
+
+
+	-------------------------------------------------
+	-- PUBLIC
+	-------------------------------------------------
+
+	-------------------------------------------------
+	-- Activate: show and make active the panorama
+	-- If the preBuild is not set, we have to build it now.
+	-- Turns out, it is a slow load, so better to do just when we need it.
+	-------------------------------------------------
+	function panoGroup:activate()
+		if (not self.loaded) then
+			self:loadImages()
+		end
+
+		self.isVisible = true
+		
 		params = {
 			alpha = 1,
 			time = params.activateTime or 1000,
 		}
-		transition.to(panoGroup, params)
-		panoGroup.isActive = true
+		transition.to(self, params)
+		self.isActive = true
 		switchNavMethod(false)
 	end
 	
@@ -667,57 +1053,47 @@ function new(params)
 	-------------------------------------------------
 	-- Deactivate:  zoom or fade out
 	-------------------------------------------------
-	function panoGroup:deactivate(x,y)
-		local function alldone()
-			panoGroup.isVisible = false
-		end
+	function panoGroup:deactivate()
+
+			local function alldone()
+				self.isVisible = false
+			end
 		
-		params = {
+		local params = {
 			alpha = 0,
 			time = params.activateTime or 1000,
 			onComplete = alldone,
 		}
-		transition.to(panoGroup, params)
-		panoGroup.isActive = false
+		transition.to(self, params)
+		self.isActive = false
+		
+		-- This will remove Runtime events
 		switchNavMethod(true)
 	end
-	
-	
-	
-	local function addCloseButton(params)
-		local default = params.closeButtonDefault or "_ui/button-cancel-round.png"
-		local over = params.closeButtonOver or "_ui/button-cancel-round-over.png"
-		-- Now make close button
-		closeButton = ui.newButton{
-			default = default,
-			over = over,
-			onRelease = panoGroup.deactivate,
-			x=0,
-			y=0,
-		}
 		
-		closeButton:setReferencePoint(display.TopLeftReferencePoint)
-		-- allow 10 px for the shadow of the popup background
-		local x = params.closeButtonX or (screenW - closeButton.width - 10)
-		local y = params.closeButtonY or (screenH - closeButton.height - 10)
-		local x, y, ref = funx.positionObjectWithReferencePoint(x, y, screenW, screenH, params.margins, params.absolute)
-		
-		closeButton:toFront()
-		panoGroup:insert(closeButton)
-		panoGroup.closeButton = closeButton
-		closeButton:setReferencePoint(display[ref])
-
-		closeButton.x = x
-		closeButton.y = y
+	
+	-------------------------------------------------
+	-- Remove all runtime handlers from the slideview object.
+	-- This has to be done if you want to destroy it.
+	-- *** Probably not needed, since deactivate will do this! ***
+	-------------------------------------------------
+	function panoGroup:removeRuntimeHandlers()
+		for i, myHandler in ipairs(self._mb_runtimeHandlers) do
+			Runtime:removeEventListener( myHandler[1], myHandler[2] )
+		end
 	end
 	
 	
 
 	-------------------------------------------------
+	-- MAIN
 	-------------------------------------------------
-	-------------------------------------------------
-
+	
+	panoGroup.path = params.bookpath or "_user"
+	panoGroup.basedir = params.basedir or system.ResourceDirectory
+	
 	params.filename = params.filename or "panorama.jpg"
+	--params.filename = funx.replaceWildcard(params.filename, panoGroup.path)
 	
 	if (not params.filename) then 
 		return false
@@ -728,84 +1104,22 @@ function new(params)
 	params.zoom = params.zoom or 1
 	params.tiltAngle = params.tiltAngle or 90
 	params.orientation = params.orientation or "landscape"
-	local panoImage = buildRepeatingImage(params.filename, params.panoOverlay, params.backgroundcolor, params.zoom, params.tiltAngle, params.orientation)
 	
-	navtype = params.navtype or "accelerometer"
-	
-	pano:insert(panoImage)
-	pano.imagelayer = panoImage
-	
-	pano:setReferencePoint(display.CenterReferencePoint)
-	pano.x = params.x
-	pano.y = params.y
-	
-	-- Values for scrolling
-	pano.minX = midscreenX -  ( panoImage.contentWidth/2 )
-	pano.maxX = ( panoImage.contentWidth/2 ) + midscreenX
-	pano.minY = midscreenY -  ( panoImage.contentHeight/2 )
-	pano.maxY = ( panoImage.contentHeight/2 ) - midscreenY
-	-- four directions to fill up, N,S,E,W
-	pano.imageWidthPixelsPerDegree = panoWidth / 360
-	--print ("imageWidthPixelsPerDegree", imageWidthPixelsPerDegree)
+	panoGroup.settings = params
+	panoGroup.loaded = false
 
-	pano.imageHeightPixelsPerDegree = (panoHeight - screenH) / params.tiltAngle
-		
-	pano.originalScale = params.originalScale or 1
+	panoGroup:buildPanoStructure()
 
-	-------------------------------------------------
-	-- Add touch listeners
-	local touchActions = {
-				init = initSwipe,
-				swipeLeft = goLeft,
-				swipeRight = goRight,
-				swipeUp = goUp,
-				swipeDown = goDown,
-				cancelSwipe = doNothing,
-				swiping = followSwipe,
-				tap = onTap,
-				endSwipe = doNothing,
-				allowHVSwiping = true,
-				}
-	
-	local swipeListener = onSwipe.new(touchActions)
-	pano.touch = swipeListener
-	pano:addEventListener( "touch", pano )
-	
-	
-	if (not params.touchonly) then
-		if (navtype == "gyrotilt" or navtype == "gyrovr") then
-			-------------------------------------------------
-			-- Add gyro listeners
-			system.setGyroscopeInterval( 62 )
-			Runtime:addEventListener( "gyroscope", panoGroup )
-		else
-			-------------------------------------------------
-			-- Add accelerometer listeners
-			pano.damper = 10
-			system.setAccelerometerInterval( 62.0 )	-- default: 75.0 (30fps) or 62.0 for 60 fps
-			Runtime:addEventListener( "accelerometer", panoGroup )
-		end
+	if (panoGroup.preload) then
+		panoGroup:loadImages()
 	end
 	
-	if (params.showCloseButton) then
-		addCloseButton(params)
-	end
-	panoGroup:insert(pano)
-	pano.x = 0
-	pano.y = 0
-	
-	-- Static Overlay
-	if (params.overlay) then
-		panoGroup:insert(params.overlay)
-		local x, y, ref = funx.positionObjectWithReferencePoint(params.overlayX, params.overlayY, screenW, screenH, params.margins, params.absolute)
-		params.overlay:setReferencePoint(display[ref])
-		--print (x,y,ref)
-		params.overlay.x = x or 0
-		params.overlay.y = y + midscreenY
-	end
-	if (params.showCloseButton) then
-		panoGroup.closeButton:toFront()
-	end
+	panoGroup:init(params)
 	return panoGroup
 	
 end -- new
+
+
+	
+
+return P
