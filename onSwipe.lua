@@ -39,6 +39,8 @@ local swipeDistance = 40
 
 function new(actions)  
 
+	local allowHVSwiping = actions.allowHVSwiping or false
+
 	local function swipeLeft(touch)
 		if (actions.swipeLeft) then
 			-- print ("swipeLeft")
@@ -141,13 +143,15 @@ function new(actions)
 				prevPosX = touch.x
 				prevPosY = touch.y
 				
+				-- Unless this is some free-form swiping, then
 				-- A vertical movement should not be confused with a horizontal
-				if (abs(deltaX) > abs(deltaY)) then
-					deltaY = 0
-				else
-					deltaX = 0
+				if (not allowHVSwiping) then
+					if (abs(deltaX) > abs(deltaY)) then
+						deltaY = 0
+					else
+						deltaX = 0
+					end
 				end
-				
 				if (abs(deltaX) + abs(deltaY) > 0) then
 					swiping(deltaX, deltaY)
 				end

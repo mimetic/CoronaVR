@@ -263,7 +263,7 @@ local function sendImages(params, isScreenshot)
 end
 
 local function sendRemoteImages(payload)
-	if(payload.getImage) then
+	if(type(payload) == "table" and payload.getImage) then
 
 		sendImages({payload.getImage})
 	end
@@ -602,7 +602,7 @@ local function enterFrame()
 		sendMessage = sendMessage..". "
 	end
 	--]]
-	if(payload) then
+	if(type(payload) == "table") then
 			sendRemoteImages(payload)	
 		if(payload.screenWidth and payload.screenHeight) then
 			setScreenSize(payload)
